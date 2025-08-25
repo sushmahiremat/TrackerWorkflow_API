@@ -1,4 +1,5 @@
 import time
+import logging
 from datetime import timedelta
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,16 +13,25 @@ from auth import create_access_token, get_current_user
 from google_auth import google_auth_service
 from config import settings
 from models import User
+from ai_service import ai_service
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="TrackerWorkflow API", version="1.0.0")
 
-# CORS middleware - Fixed configuration for frontend
+# CORS middleware - Configuration for both development and production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Frontend URL
+    allow_origins=[
+        "http://localhost:5173",  # Development frontend URL
+        "https://tracker-workflow.vercel.app",  # Production Vercel URL
+        "https://*.vercel.app"  # Any Vercel subdomain
+    ],
     allow_credentials=True,  # Allow credentials
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
@@ -238,6 +248,59 @@ def clear_caches():
     _token_cache.clear()
     
     return {"message": "All caches cleared successfully"}
+
+# AI endpoints
+@app.post("/ai/summarize-task")
+async def summarize_task(request: dict):
+    """Generate AI-powered task summary and subtasks"""
+    try:
+        description = request.get("description", "")
+        if not description:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Task description is required"
+            )
+        
+        logger.info(f"AI request received for description: {description[:100]}...")
+        
+        # Generate AI summary and subtasks
+        result = await ai_service.summarize_task(description)
+        
+        logger.info(f"AI response generated: summary={result.get('summary', 'N/A')[:50]}..., subtasks_count={len(result.get('subtasks', []))}")
+        
+        return {
+            "success": True,
+            "data": result
+        }
+        
+    except Exception as e:
+        logger.error(f"AI endpoint error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="AI service temporarily unavailable"
+        )
+
+@app.get("/ai/test")
+async def test_ai_service():
+    """Test endpoint to verify AI service is working"""
+    try:
+        test_description = "Build a complete user authentication system with Google SSO and password reset functionality"
+        result = await ai_service.summarize_task(test_description)
+        
+        return {
+            "success": True,
+            "message": "AI service is working",
+            "test_description": test_description,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"AI test error: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "AI service test failed"
+        }
 
 if __name__ == "__main__":
     import uvicorn
