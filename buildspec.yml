@@ -3,64 +3,30 @@ version: 0.2
 phases:
   pre_build:
     commands:
-      - echo Installing Python dependencies...
-      - python --version
-      - pip --version
-      - pip install --upgrade pip
-      - pip install -r requirements.txt
-      - echo Creating uploads directory...
-      - mkdir -p uploads
-      - echo Pre-build phase complete
+      - echo Logging in to Amazon ECR...
+      - echo Build started on `date`
+      - echo Building the FastAPI backend application...
+      - aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 222907690579.dkr.ecr.us-west-2.amazonaws.com
 
   build:
     commands:
       - echo Build started on `date`
-      - echo Verifying application structure...
-      - ls -la
-      - echo Running database connection test...
-      - |
-        if [ -f test_connection.py ]; then
-          python test_connection.py || echo "Database connection test skipped or failed"
-        else
-          echo "test_connection.py not found, skipping database test"
-        fi
-      - echo Build phase complete
+      - echo Building the Python FastAPI application...
+      - docker build -t trackerworkflow-api .
 
   post_build:
     commands:
       - echo Build completed on `date`
-      - echo Application is ready for deployment
-      - |
-        # Optional: Run tests if RUN_TESTS environment variable is set to "true"
-        if [ "$RUN_TESTS" = "true" ]; then
-          echo Running test suite...
-          python test_api.py || echo "Test suite completed with warnings"
-        else
-          echo "Skipping tests (set RUN_TESTS=true to enable)"
-        fi
+      - echo Pushing the Docker image to ECR...
+      - docker tag trackerworkflow-api:latest 222907690579.dkr.ecr.us-west-2.amazonaws.com/trackerworkflow-api:latest
+      - docker push 222907690579.dkr.ecr.us-west-2.amazonaws.com/trackerworkflow-api:latest
 
 artifacts:
   files:
     - "**/*"
-  name: TrackerWorkflow-API-$(date +%Y-%m-%d)
-
-env:
-  variables:
-    # These should be set in CodeBuild environment variables or Parameter Store
-    # DATABASE_URL: "postgresql://user:password@host:port/database"
-    # SECRET_KEY: "your-secret-key"
-    # ALGORITHM: "HS256"
-    # ACCESS_TOKEN_EXPIRE_MINUTES: "30"
-    # GOOGLE_CLIENT_ID: "your-google-client-id"
-    # GOOGLE_CLIENT_SECRET: "your-google-client-secret"
-    PYTHONUNBUFFERED: "1"
-  # parameter-store:
-  #   # Uncomment this section and configure these if using AWS Systems Manager Parameter Store
-  #   # DATABASE_URL: "/trackerworkflow/database/url"
-  #   # SECRET_KEY: "/trackerworkflow/jwt/secret-key"
-  #   # GOOGLE_CLIENT_ID: "/trackerworkflow/google/client-id"
-  #   # GOOGLE_CLIENT_SECRET: "/trackerworkflow/google/client-secret"
+  name: trackerworkflow-api-$(date +%Y-%m-%d)
 
 cache:
   paths:
     - "/root/.cache/pip/**/*"
+    - "/opt/venv/**/*"
