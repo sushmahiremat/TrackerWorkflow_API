@@ -6,25 +6,25 @@ phases:
       - echo Logging in to Amazon ECR...
       - echo Build started on `date`
       - echo Building the FastAPI backend application...
-      - aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 222907690579.dkr.ecr.us-west-2.amazonaws.com
+      - aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 290008131176.dkr.ecr.us-west-2.amazonaws.com/tracker_api
 
   build:
     commands:
       - echo Build started on `date`
       - echo Building the Python FastAPI application...
-      - docker build -t trackerworkflow-api .
+      - docker build -t tracker_api .
 
   post_build:
     commands:
       - echo Build completed on `date`
       - echo Pushing the Docker image to ECR...
-      - docker tag trackerworkflow-api:latest 222907690579.dkr.ecr.us-west-2.amazonaws.com/trackerworkflow-api:latest
-      - docker push 222907690579.dkr.ecr.us-west-2.amazonaws.com/trackerworkflow-api:latest
+      - docker tag tracker_api:latest 290008131176.dkr.ecr.us-west-2.amazonaws.com/tracker_api
+      - docker push 290008131176.dkr.ecr.us-west-2.amazonaws.com/tracker_api
 
 artifacts:
   files:
     - "**/*"
-  name: trackerworkflow-api-$(date +%Y-%m-%d)
+  name: tracker_api-$(date +%Y-%m-%d)
 
 cache:
   paths:
