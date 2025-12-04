@@ -65,7 +65,7 @@ client_id: 'your-actual-google-client-id', // Replace with your actual client ID
 python main.py
 
 # Or with uvicorn
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 ## API Endpoints

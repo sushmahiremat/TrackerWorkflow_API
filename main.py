@@ -1,14 +1,21 @@
 import time
 import logging
+import os
+import shutil
+import re
+from typing import Optional
 from datetime import timedelta
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from database import engine, get_db
-from models import Base
-from schemas import UserCreate, UserLogin, UserResponse, Token, ProjectCreate, ProjectResponse, TaskCreate, TaskResponse, GoogleLogin
-from crud import create_user, authenticate_user, create_or_get_google_user, create_project, get_projects, get_project_by_id, update_project, delete_project, create_task, get_tasks, get_task_by_id, get_tasks_by_project, update_task, delete_task
+from models import Base, Notification
+from schemas import UserCreate, UserLogin, UserResponse, Token, ProjectCreate, ProjectResponse, TaskCreate, TaskResponse, GoogleLogin, CommentCreate, CommentResponse, AttachmentCreate, AttachmentResponse, NotificationCreate, NotificationResponse, TeamCreate, TeamResponse, TeamMemberCreate, TeamMemberResponse, ActivityCreate, ActivityResponse
+from crud import create_user, authenticate_user, create_or_get_google_user, create_project, get_projects, get_project_by_id, update_project, delete_project, create_task, get_tasks, get_task_by_id, get_tasks_by_project, update_task, delete_task, create_comment, get_comments_by_task, get_comment_by_id, update_comment, delete_comment, create_attachment, get_attachments_by_task, get_attachment_by_id, delete_attachment, create_notification, get_notifications_by_user, get_unread_notifications_count, get_notification_by_id, mark_notification_as_read, mark_all_notifications_as_read, delete_notification, create_team, get_teams, get_team_by_id, get_teams_by_user, update_team, delete_team, add_team_member, get_team_members, get_team_member, update_member_status, update_member_role, remove_team_member, create_activity, get_activities, get_activity_by_id
+from models import NotificationType, TeamRole, MemberStatus, ActivityType
+from utils import parse_mentions
 from auth import create_access_token, get_current_user
 from google_auth import google_auth_service
 from config import settings
@@ -23,6 +30,15 @@ logger = logging.getLogger(__name__)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="TrackerWorkflow API", version="1.0.0")
+
+# Create uploads directory if it doesn't exist
+UPLOAD_DIR = "uploads"
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
+    logger.info(f"Created uploads directory: {UPLOAD_DIR}")
+
+# Mount static files for serving uploaded files
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # CORS middleware - Configuration for both development and production
 app.add_middleware(
@@ -136,7 +152,21 @@ def create_new_project(project: ProjectCreate, db: Session = Depends(get_db)):
 @app.get("/projects", response_model=list[ProjectResponse])
 def get_all_projects(db: Session = Depends(get_db)):
     """Get all projects"""
-    return get_projects(db=db)
+    try:
+        projects = get_projects(db=db)
+        logger.info(f"📦 API: Retrieved {len(projects)} projects from database")
+        # Log first project details if any exist
+        if projects:
+            logger.info(f"📦 API: First project example: id={projects[0].id}, name={projects[0].name}")
+        else:
+            logger.info("📦 API: No projects found in database")
+        return projects
+    except Exception as e:
+        logger.error(f"❌ API: Error getting projects: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving projects: {str(e)}"
+        )
 
 @app.get("/projects/{project_id}", response_model=ProjectResponse)
 def get_project(project_id: int, db: Session = Depends(get_db)):
@@ -173,9 +203,56 @@ def delete_existing_project(project_id: int, db: Session = Depends(get_db)):
 
 # Task endpoints
 @app.post("/tasks", response_model=TaskResponse)
-def create_new_task(task: TaskCreate, db: Session = Depends(get_db)):
+def create_new_task(task: TaskCreate, user_name: str = "Anonymous", db: Session = Depends(get_db)):
     """Create a new task"""
-    return create_task(db=db, task=task)
+    new_task = create_task(db=db, task=task)
+    
+    # Parse @mentions from description
+    mentions = []
+    if task.description:
+        mentions = parse_mentions(task.description)
+    
+    # Create notification if task has an assignee
+    if new_task.assignee:
+        logger.info(f"📬 Creating notification for new task assignment: user_name={new_task.assignee}, task_id={new_task.id}")
+        notification = NotificationCreate(
+            type=NotificationType.TASK_ASSIGNED,
+            title=f"New Task Assigned: {new_task.title}",
+            message=f"You have been assigned to a new task '{new_task.title}'.",
+            user_name=new_task.assignee,
+            task_id=new_task.id,
+            project_id=new_task.project_id
+        )
+        created_notification = create_notification(db=db, notification=notification)
+        logger.info(f"✅ Notification created: id={created_notification.id}")
+    
+    # Create notifications for @mentions
+    for mentioned_user in mentions:
+        if mentioned_user != user_name:  # Don't notify yourself
+            logger.info(f"📬 Creating mention notification: user_name={mentioned_user}, task_id={new_task.id}")
+            mention_notification = NotificationCreate(
+                type=NotificationType.MENTION,
+                title=f"You were mentioned in: {new_task.title}",
+                message=f"{user_name} mentioned you in task '{new_task.title}': {task.description[:100]}...",
+                user_name=mentioned_user,
+                task_id=new_task.id,
+                project_id=new_task.project_id
+            )
+            create_notification(db=db, notification=mention_notification)
+    
+    # Create activity log
+    project = get_project_by_id(db=db, project_id=new_task.project_id)
+    activity = ActivityCreate(
+        type=ActivityType.TASK_CREATED,
+        description=f"{user_name} created task '{new_task.title}'",
+        user_name=user_name,
+        project_id=new_task.project_id,
+        task_id=new_task.id,
+        team_id=None  # team_id temporarily removed from Project model
+    )
+    create_activity(db=db, activity=activity)
+    
+    return new_task
 
 @app.get("/tasks", response_model=list[TaskResponse])
 def get_all_tasks(db: Session = Depends(get_db)):
@@ -201,24 +278,290 @@ def get_tasks_by_project_id(project_id: int, db: Session = Depends(get_db)):
 @app.put("/tasks/{task_id}", response_model=TaskResponse)
 def update_existing_task(task_id: int, task: TaskCreate, db: Session = Depends(get_db)):
     """Update an existing task"""
+    # Get the existing task to check for changes
+    existing_task = get_task_by_id(db=db, task_id=task_id)
+    if not existing_task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    # Check if assignee changed
+    old_assignee = existing_task.assignee
+    new_assignee = task.assignee
+    
     updated_task = update_task(db=db, task_id=task_id, task=task)
     if not updated_task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Task not found"
         )
+    
+    # Parse @mentions from description
+    mentions = []
+    if updated_task.description:
+        mentions = parse_mentions(updated_task.description)
+    
+    # Create notification if assignee changed and new assignee is set
+    if new_assignee and new_assignee != old_assignee:
+        logger.info(f"📬 Creating notification for task assignment: user_name={new_assignee}, task_id={updated_task.id}")
+        notification = NotificationCreate(
+            type=NotificationType.TASK_ASSIGNED,
+            title=f"Task Assigned: {updated_task.title}",
+            message=f"You have been assigned to the task '{updated_task.title}' in project.",
+            user_name=new_assignee,
+            task_id=updated_task.id,
+            project_id=updated_task.project_id
+        )
+        created_notification = create_notification(db=db, notification=notification)
+        logger.info(f"✅ Notification created: id={created_notification.id}")
+    
+    # Create notifications for @mentions
+    for mentioned_user in mentions:
+        if mentioned_user != user_name and mentioned_user != new_assignee:  # Don't notify yourself or the assignee
+            logger.info(f"📬 Creating mention notification: user_name={mentioned_user}, task_id={updated_task.id}")
+            mention_notification = NotificationCreate(
+                type=NotificationType.MENTION,
+                title=f"You were mentioned in: {updated_task.title}",
+                message=f"{user_name} mentioned you in task '{updated_task.title}': {updated_task.description[:100]}...",
+                user_name=mentioned_user,
+                task_id=updated_task.id,
+                project_id=updated_task.project_id
+            )
+            create_notification(db=db, notification=mention_notification)
+    
+    # Create activity log for task update
+    project = get_project_by_id(db=db, project_id=updated_task.project_id)
+    activity_description = f"{user_name} updated task '{updated_task.title}'"
+    activity_metadata = {}
+    
+    if task.status != existing_task.status:
+        activity_description += f" (status changed from {existing_task.status} to {task.status})"
+        activity_metadata["old_status"] = existing_task.status
+        activity_metadata["new_status"] = task.status
+    
+    if new_assignee != old_assignee:
+        activity_description += f" (assignee changed from {old_assignee or 'Unassigned'} to {new_assignee or 'Unassigned'})"
+        activity_metadata["old_assignee"] = old_assignee
+        activity_metadata["new_assignee"] = new_assignee
+    
+    activity = ActivityCreate(
+        type=ActivityType.TASK_UPDATED,
+        description=activity_description,
+        user_name=user_name,
+        project_id=updated_task.project_id,
+        task_id=updated_task.id,
+        team_id=None,  # team_id temporarily removed from Project model
+        activity_metadata=activity_metadata
+    )
+    create_activity(db=db, activity=activity)
+    
     return updated_task
 
 @app.delete("/tasks/{task_id}")
-def delete_existing_task(task_id: int, db: Session = Depends(get_db)):
+def delete_existing_task(task_id: int, user_name: str = "Anonymous", db: Session = Depends(get_db)):
     """Delete a task"""
+    task = get_task_by_id(db=db, task_id=task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    project = get_project_by_id(db=db, project_id=task.project_id)
+    
     success = delete_task(db=db, task_id=task_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Task not found"
         )
+    
+    # Create activity log
+    activity = ActivityCreate(
+        type=ActivityType.TASK_DELETED,
+        description=f"{user_name} deleted task '{task.title}'",
+        user_name=user_name,
+        project_id=task.project_id,
+        team_id=None  # team_id temporarily removed from Project model
+    )
+    create_activity(db=db, activity=activity)
+    
     return {"message": "Task deleted successfully"}
+
+# Comment endpoints
+@app.post("/tasks/{task_id}/comments", response_model=CommentResponse)
+def create_task_comment(task_id: int, comment: CommentCreate, db: Session = Depends(get_db)):
+    """Create a new comment for a task"""
+    # Verify task exists
+    task = get_task_by_id(db=db, task_id=task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    # Create comment with task_id from path
+    comment_data = CommentCreate(
+        content=comment.content,
+        task_id=task_id,  # Use task_id from URL path
+        user_name=comment.user_name
+    )
+    return create_comment(db=db, comment=comment_data)
+
+@app.get("/tasks/{task_id}/comments", response_model=list[CommentResponse])
+def get_task_comments(task_id: int, db: Session = Depends(get_db)):
+    """Get all comments for a task"""
+    # Verify task exists
+    task = get_task_by_id(db=db, task_id=task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    return get_comments_by_task(db=db, task_id=task_id)
+
+@app.put("/comments/{comment_id}", response_model=CommentResponse)
+def update_task_comment(comment_id: int, request: dict, db: Session = Depends(get_db)):
+    """Update a comment"""
+    content = request.get("content", "")
+    updated_comment = update_comment(db=db, comment_id=comment_id, content=content)
+    if not updated_comment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comment not found"
+        )
+    return updated_comment
+
+@app.delete("/comments/{comment_id}")
+def delete_task_comment(comment_id: int, db: Session = Depends(get_db)):
+    """Delete a comment"""
+    success = delete_comment(db=db, comment_id=comment_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comment not found"
+        )
+    return {"message": "Comment deleted successfully"}
+
+# Attachment endpoints
+@app.post("/tasks/{task_id}/attachments", response_model=AttachmentResponse)
+async def upload_task_attachment(
+    task_id: int,
+    file: UploadFile = File(...),
+    user_name: str = None,
+    db: Session = Depends(get_db)
+):
+    """Upload an attachment for a task"""
+    # Verify task exists
+    task = get_task_by_id(db=db, task_id=task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    # Create task-specific directory
+    task_upload_dir = os.path.join(UPLOAD_DIR, f"task_{task_id}")
+    if not os.path.exists(task_upload_dir):
+        os.makedirs(task_upload_dir)
+    
+    # Generate unique filename
+    file_ext = os.path.splitext(file.filename)[1]
+    import uuid
+    unique_filename = f"{uuid.uuid4()}{file_ext}"
+    file_path = os.path.join(task_upload_dir, unique_filename)
+    
+    # Save file
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Get file size
+        file_size = os.path.getsize(file_path)
+        
+        # Create attachment record
+        attachment_data = AttachmentCreate(
+            file_name=file.filename,
+            file_path=f"task_{task_id}/{unique_filename}",
+            file_size=file_size,
+            file_type=file.content_type,
+            task_id=task_id,
+            user_name=user_name
+        )
+        
+        return create_attachment(db=db, attachment=attachment_data)
+    except Exception as e:
+        logger.error(f"Error uploading file: {e}")
+        # Clean up file if database operation fails
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error uploading file: {str(e)}"
+        )
+
+@app.get("/tasks/{task_id}/attachments", response_model=list[AttachmentResponse])
+def get_task_attachments(task_id: int, db: Session = Depends(get_db)):
+    """Get all attachments for a task"""
+    # Verify task exists
+    task = get_task_by_id(db=db, task_id=task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    return get_attachments_by_task(db=db, task_id=task_id)
+
+@app.get("/attachments/{attachment_id}/download")
+def download_attachment(attachment_id: int, db: Session = Depends(get_db)):
+    """Download an attachment file"""
+    attachment = get_attachment_by_id(db=db, attachment_id=attachment_id)
+    if not attachment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found"
+        )
+    
+    file_path = os.path.join(UPLOAD_DIR, attachment.file_path)
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found"
+        )
+    
+    return FileResponse(
+        path=file_path,
+        filename=attachment.file_name,
+        media_type=attachment.file_type or "application/octet-stream"
+    )
+
+@app.delete("/attachments/{attachment_id}")
+def delete_task_attachment(attachment_id: int, db: Session = Depends(get_db)):
+    """Delete an attachment"""
+    attachment = get_attachment_by_id(db=db, attachment_id=attachment_id)
+    if not attachment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found"
+        )
+    
+    # Delete file from filesystem
+    file_path = os.path.join(UPLOAD_DIR, attachment.file_path)
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            logger.error(f"Error deleting file: {e}")
+    
+    # Delete from database
+    success = delete_attachment(db=db, attachment_id=attachment_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found"
+        )
+    return {"message": "Attachment deleted successfully"}
 
 @app.get("/")
 def read_root():
@@ -248,6 +591,158 @@ def clear_caches():
     _token_cache.clear()
     
     return {"message": "All caches cleared successfully"}
+
+# Notification endpoints
+@app.post("/notifications", response_model=NotificationResponse)
+def create_notification_endpoint(notification: NotificationCreate, db: Session = Depends(get_db)):
+    """Create a new notification"""
+    return create_notification(db=db, notification=notification)
+
+@app.get("/notifications/user/{user_name}", response_model=list[NotificationResponse])
+def get_user_notifications(user_name: str, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """Get all notifications for a user"""
+    return get_notifications_by_user(db=db, user_name=user_name, skip=skip, limit=limit)
+
+@app.get("/notifications/user/{user_name}/unread/count")
+def get_unread_notifications_count_endpoint(user_name: str, db: Session = Depends(get_db)):
+    """Get count of unread notifications for a user"""
+    count = get_unread_notifications_count(db=db, user_name=user_name)
+    return {"count": count}
+
+@app.put("/notifications/{notification_id}/read", response_model=NotificationResponse)
+def mark_notification_read(notification_id: int, db: Session = Depends(get_db)):
+    """Mark a notification as read"""
+    notification = mark_notification_as_read(db=db, notification_id=notification_id)
+    if not notification:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notification not found"
+        )
+    return notification
+
+@app.put("/notifications/user/{user_name}/read-all")
+def mark_all_notifications_read(user_name: str, db: Session = Depends(get_db)):
+    """Mark all notifications as read for a user"""
+    mark_all_notifications_as_read(db=db, user_name=user_name)
+    return {"message": "All notifications marked as read"}
+
+@app.delete("/notifications/{notification_id}")
+def delete_notification_endpoint(notification_id: int, db: Session = Depends(get_db)):
+    """Delete a notification"""
+    success = delete_notification(db=db, notification_id=notification_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notification not found"
+        )
+    return {"message": "Notification deleted successfully"}
+
+# Team endpoints
+@app.post("/teams", response_model=TeamResponse)
+def create_new_team(team: TeamCreate, user_name: str = "Anonymous", db: Session = Depends(get_db)):
+    """Create a new team"""
+    return create_team(db=db, team=team, created_by=user_name)
+
+@app.get("/teams", response_model=list[TeamResponse])
+def get_all_teams(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """Get all teams"""
+    return get_teams(db=db, skip=skip, limit=limit)
+
+@app.get("/teams/user/{user_name}", response_model=list[TeamResponse])
+def get_user_teams(user_name: str, db: Session = Depends(get_db)):
+    """Get all teams for a user"""
+    return get_teams_by_user(db=db, user_name=user_name)
+
+@app.get("/teams/{team_id}", response_model=TeamResponse)
+def get_team(team_id: int, db: Session = Depends(get_db)):
+    """Get a specific team"""
+    team = get_team_by_id(db=db, team_id=team_id)
+    if not team:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team not found"
+        )
+    return team
+
+@app.put("/teams/{team_id}", response_model=TeamResponse)
+def update_existing_team(team_id: int, team: TeamCreate, db: Session = Depends(get_db)):
+    """Update a team"""
+    updated_team = update_team(db=db, team_id=team_id, team=team)
+    if not updated_team:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team not found"
+        )
+    return updated_team
+
+@app.delete("/teams/{team_id}")
+def delete_existing_team(team_id: int, db: Session = Depends(get_db)):
+    """Delete a team"""
+    success = delete_team(db=db, team_id=team_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team not found"
+        )
+    return {"message": "Team deleted successfully"}
+
+# TeamMember endpoints
+@app.post("/teams/{team_id}/members", response_model=TeamMemberResponse)
+def add_member_to_team(team_id: int, member: TeamMemberCreate, db: Session = Depends(get_db)):
+    """Add a member to a team"""
+    member.team_id = team_id
+    return add_team_member(db=db, member=member)
+
+@app.get("/teams/{team_id}/members", response_model=list[TeamMemberResponse])
+def get_team_members_endpoint(team_id: int, db: Session = Depends(get_db)):
+    """Get all members of a team"""
+    return get_team_members(db=db, team_id=team_id)
+
+@app.put("/teams/{team_id}/members/{user_name}/status")
+def update_member_status_endpoint(team_id: int, user_name: str, status: MemberStatus, db: Session = Depends(get_db)):
+    """Update a member's status"""
+    member = update_member_status(db=db, team_id=team_id, user_name=user_name, status=status)
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team member not found"
+        )
+    return member
+
+@app.put("/teams/{team_id}/members/{user_name}/role")
+def update_member_role_endpoint(team_id: int, user_name: str, role: TeamRole, db: Session = Depends(get_db)):
+    """Update a member's role"""
+    member = update_member_role(db=db, team_id=team_id, user_name=user_name, role=role)
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team member not found"
+        )
+    return member
+
+@app.delete("/teams/{team_id}/members/{user_name}")
+def remove_member_from_team(team_id: int, user_name: str, db: Session = Depends(get_db)):
+    """Remove a member from a team"""
+    success = remove_team_member(db=db, team_id=team_id, user_name=user_name)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team member not found"
+        )
+    return {"message": "Member removed successfully"}
+
+# Activity endpoints
+@app.post("/activities", response_model=ActivityResponse)
+def create_activity_endpoint(activity: ActivityCreate, db: Session = Depends(get_db)):
+    """Create a new activity"""
+    return create_activity(db=db, activity=activity)
+
+@app.get("/activities", response_model=list[ActivityResponse])
+def get_activities_endpoint(team_id: Optional[int] = None, project_id: Optional[int] = None, 
+                           task_id: Optional[int] = None, skip: int = 0, limit: int = 100, 
+                           db: Session = Depends(get_db)):
+    """Get activities with optional filters"""
+    return get_activities(db=db, team_id=team_id, project_id=project_id, task_id=task_id, skip=skip, limit=limit)
 
 # AI endpoints
 @app.post("/ai/summarize-task")

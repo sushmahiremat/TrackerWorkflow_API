@@ -1,7 +1,9 @@
 import time
+from typing import Optional
 from sqlalchemy.orm import Session
-from models import User, Project, Task
-from schemas import UserCreate, ProjectCreate, TaskCreate, GoogleUserInfo
+from sqlalchemy.sql import func
+from models import User, Project, Task, Comment, Attachment, Notification, NotificationType, Team, TeamMember, Activity, TeamRole, MemberStatus, ActivityType
+from schemas import UserCreate, ProjectCreate, TaskCreate, GoogleUserInfo, CommentCreate, AttachmentCreate, NotificationCreate, TeamCreate, TeamMemberCreate, ActivityCreate
 from auth import get_password_hash, verify_password
 
 # Simple in-memory cache for user lookups
@@ -124,7 +126,13 @@ def create_project(db: Session, project: ProjectCreate):
     return db_project
 
 def get_projects(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(Project).offset(skip).limit(limit).all()
+    try:
+        projects = db.query(Project).offset(skip).limit(limit).all()
+        print(f"📦 CRUD: Retrieved {len(projects)} projects from database")
+        return projects
+    except Exception as e:
+        print(f"❌ CRUD: Error retrieving projects: {e}")
+        raise
 
 def get_project_by_id(db: Session, project_id: int):
     return db.query(Project).filter(Project.id == project_id).first()
@@ -159,6 +167,7 @@ def create_task(db: Session, task: TaskCreate):
         priority=task.priority,
         assignee=task.assignee,
         due_date=task.due_date,
+        tags=task.tags if task.tags else [],
         project_id=task.project_id
     )
     db.add(db_task)
@@ -186,6 +195,7 @@ def update_task(db: Session, task_id: int, task: TaskCreate):
     db_task.priority = task.priority
     db_task.assignee = task.assignee
     db_task.due_date = task.due_date
+    db_task.tags = task.tags if task.tags is not None else (db_task.tags if db_task.tags else [])
     
     db.commit()
     db.refresh(db_task)
@@ -198,4 +208,278 @@ def delete_task(db: Session, task_id: int):
     
     db.delete(db_task)
     db.commit()
-    return True 
+    return True
+
+# Comment CRUD operations
+def create_comment(db: Session, comment: CommentCreate):
+    db_comment = Comment(
+        content=comment.content,
+        task_id=comment.task_id,
+        user_name=comment.user_name
+    )
+    db.add(db_comment)
+    db.commit()
+    db.refresh(db_comment)
+    return db_comment
+
+def get_comments_by_task(db: Session, task_id: int):
+    return db.query(Comment).filter(Comment.task_id == task_id).order_by(Comment.created_at.desc()).all()
+
+def get_comment_by_id(db: Session, comment_id: int):
+    return db.query(Comment).filter(Comment.id == comment_id).first()
+
+def update_comment(db: Session, comment_id: int, content: str):
+    db_comment = get_comment_by_id(db, comment_id)
+    if not db_comment:
+        return None
+    
+    db_comment.content = content
+    db.commit()
+    db.refresh(db_comment)
+    return db_comment
+
+def delete_comment(db: Session, comment_id: int):
+    db_comment = get_comment_by_id(db, comment_id)
+    if not db_comment:
+        return False
+    
+    db.delete(db_comment)
+    db.commit()
+    return True
+
+# Attachment CRUD operations
+def create_attachment(db: Session, attachment: AttachmentCreate):
+    db_attachment = Attachment(
+        file_name=attachment.file_name,
+        file_path=attachment.file_path,
+        file_size=attachment.file_size,
+        file_type=attachment.file_type,
+        task_id=attachment.task_id,
+        user_name=attachment.user_name
+    )
+    db.add(db_attachment)
+    db.commit()
+    db.refresh(db_attachment)
+    return db_attachment
+
+def get_attachments_by_task(db: Session, task_id: int):
+    return db.query(Attachment).filter(Attachment.task_id == task_id).order_by(Attachment.created_at.desc()).all()
+
+def get_attachment_by_id(db: Session, attachment_id: int):
+    return db.query(Attachment).filter(Attachment.id == attachment_id).first()
+
+def delete_attachment(db: Session, attachment_id: int):
+    db_attachment = get_attachment_by_id(db, attachment_id)
+    if not db_attachment:
+        return False
+    
+    db.delete(db_attachment)
+    db.commit()
+    return True
+
+# Notification CRUD operations
+def create_notification(db: Session, notification: NotificationCreate):
+    db_notification = Notification(
+        type=notification.type,
+        title=notification.title,
+        message=notification.message,
+        user_name=notification.user_name,
+        task_id=notification.task_id,
+        project_id=notification.project_id,
+        is_read=False
+    )
+    db.add(db_notification)
+    db.commit()
+    db.refresh(db_notification)
+    return db_notification
+
+def get_notifications_by_user(db: Session, user_name: str, skip: int = 0, limit: int = 100):
+    notifications = db.query(Notification).filter(
+        Notification.user_name == user_name
+    ).order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
+    print(f"📬 CRUD: Found {len(notifications)} notifications for user: {user_name}")
+    return notifications
+
+def get_unread_notifications_count(db: Session, user_name: str):
+    return db.query(Notification).filter(
+        Notification.user_name == user_name,
+        Notification.is_read == False
+    ).count()
+
+def get_notification_by_id(db: Session, notification_id: int):
+    return db.query(Notification).filter(Notification.id == notification_id).first()
+
+def mark_notification_as_read(db: Session, notification_id: int):
+    db_notification = get_notification_by_id(db, notification_id)
+    if not db_notification:
+        return False
+    
+    db_notification.is_read = True
+    db.commit()
+    db.refresh(db_notification)
+    return db_notification
+
+def mark_all_notifications_as_read(db: Session, user_name: str):
+    db.query(Notification).filter(
+        Notification.user_name == user_name,
+        Notification.is_read == False
+    ).update({Notification.is_read: True})
+    db.commit()
+    return True
+
+def delete_notification(db: Session, notification_id: int):
+    db_notification = get_notification_by_id(db, notification_id)
+    if not db_notification:
+        return False
+    
+    db.delete(db_notification)
+    db.commit()
+    return True
+
+# Team CRUD operations
+def create_team(db: Session, team: TeamCreate, created_by: str):
+    db_team = Team(
+        name=team.name,
+        description=team.description,
+        created_by=created_by
+    )
+    db.add(db_team)
+    db.commit()
+    db.refresh(db_team)
+    
+    # Add creator as owner
+    creator_member = TeamMember(
+        team_id=db_team.id,
+        user_name=created_by,
+        role=TeamRole.OWNER,
+        status=MemberStatus.ONLINE
+    )
+    db.add(creator_member)
+    db.commit()
+    
+    return db_team
+
+def get_teams(db: Session, skip: int = 0, limit: int = 100):
+    return db.query(Team).offset(skip).limit(limit).all()
+
+def get_team_by_id(db: Session, team_id: int):
+    return db.query(Team).filter(Team.id == team_id).first()
+
+def get_teams_by_user(db: Session, user_name: str):
+    return db.query(Team).join(TeamMember).filter(TeamMember.user_name == user_name).all()
+
+def update_team(db: Session, team_id: int, team: TeamCreate):
+    db_team = get_team_by_id(db, team_id)
+    if not db_team:
+        return None
+    
+    db_team.name = team.name
+    db_team.description = team.description
+    db.commit()
+    db.refresh(db_team)
+    return db_team
+
+def delete_team(db: Session, team_id: int):
+    db_team = get_team_by_id(db, team_id)
+    if not db_team:
+        return False
+    
+    db.delete(db_team)
+    db.commit()
+    return True
+
+# TeamMember CRUD operations
+def add_team_member(db: Session, member: TeamMemberCreate):
+    # Check if member already exists
+    existing = db.query(TeamMember).filter(
+        TeamMember.team_id == member.team_id,
+        TeamMember.user_name == member.user_name
+    ).first()
+    
+    if existing:
+        return existing
+    
+    db_member = TeamMember(
+        team_id=member.team_id,
+        user_name=member.user_name,
+        user_email=member.user_email,
+        role=member.role,
+        status=member.status,
+        avatar_url=member.avatar_url
+    )
+    db.add(db_member)
+    db.commit()
+    db.refresh(db_member)
+    return db_member
+
+def get_team_members(db: Session, team_id: int):
+    return db.query(TeamMember).filter(TeamMember.team_id == team_id).all()
+
+def get_team_member(db: Session, team_id: int, user_name: str):
+    return db.query(TeamMember).filter(
+        TeamMember.team_id == team_id,
+        TeamMember.user_name == user_name
+    ).first()
+
+def update_member_status(db: Session, team_id: int, user_name: str, status: MemberStatus):
+    member = get_team_member(db, team_id, user_name)
+    if not member:
+        return None
+    
+    member.status = status
+    member.last_seen = func.now()
+    db.commit()
+    db.refresh(member)
+    return member
+
+def update_member_role(db: Session, team_id: int, user_name: str, role: TeamRole):
+    member = get_team_member(db, team_id, user_name)
+    if not member:
+        return None
+    
+    member.role = role
+    db.commit()
+    db.refresh(member)
+    return member
+
+def remove_team_member(db: Session, team_id: int, user_name: str):
+    member = get_team_member(db, team_id, user_name)
+    if not member:
+        return False
+    
+    db.delete(member)
+    db.commit()
+    return True
+
+# Activity CRUD operations
+def create_activity(db: Session, activity: ActivityCreate):
+    db_activity = Activity(
+        type=activity.type,
+        description=activity.description,
+        user_name=activity.user_name,
+        user_avatar=activity.user_avatar,
+        team_id=activity.team_id,
+        project_id=activity.project_id,
+        task_id=activity.task_id,
+        activity_metadata=activity.activity_metadata
+    )
+    db.add(db_activity)
+    db.commit()
+    db.refresh(db_activity)
+    return db_activity
+
+def get_activities(db: Session, team_id: Optional[int] = None, project_id: Optional[int] = None, 
+                   task_id: Optional[int] = None, skip: int = 0, limit: int = 100):
+    query = db.query(Activity)
+    
+    if team_id:
+        query = query.filter(Activity.team_id == team_id)
+    if project_id:
+        query = query.filter(Activity.project_id == project_id)
+    if task_id:
+        query = query.filter(Activity.task_id == task_id)
+    
+    return query.order_by(Activity.created_at.desc()).offset(skip).limit(limit).all()
+
+def get_activity_by_id(db: Session, activity_id: int):
+    return db.query(Activity).filter(Activity.id == activity_id).first() 

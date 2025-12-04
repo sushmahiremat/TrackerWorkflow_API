@@ -43,3 +43,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Uploads directory (user-uploaded files)
+uploads/
