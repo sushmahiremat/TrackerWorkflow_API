@@ -6,7 +6,7 @@ phases:
       - echo Logging in to Amazon ECR...
       - echo Build started on `date`
       - echo Building the FastAPI backend application...
-      - aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 290008131176.dkr.ecr.us-west-2.amazonaws.com/tracker_api
+      - aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 290008131176.dkr.ecr.us-west-2.amazonaws.com
 
   build:
     commands:
@@ -18,8 +18,8 @@ phases:
     commands:
       - echo Build completed on `date`
       - echo Pushing the Docker image to ECR...
-      - docker tag tracker_api:latest 290008131176.dkr.ecr.us-west-2.amazonaws.com/tracker_api
-      - docker push 290008131176.dkr.ecr.us-west-2.amazonaws.com/tracker_api
+      - docker tag tracker_api:latest 290008131176.dkr.ecr.us-west-2.amazonaws.com/tracker_api:latest
+      - docker push 290008131176.dkr.ecr.us-west-2.amazonaws.com/tracker_api:latest
 
 artifacts:
   files:
