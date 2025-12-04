@@ -41,7 +41,7 @@ phases:
 
 artifacts:
   files:
-    - '**/*'
+    - "**/*"
   name: TrackerWorkflow-API-$(date +%Y-%m-%d)
 
 env:
@@ -54,14 +54,13 @@ env:
     # GOOGLE_CLIENT_ID: "your-google-client-id"
     # GOOGLE_CLIENT_SECRET: "your-google-client-secret"
     PYTHONUNBUFFERED: "1"
-  parameter-store:
-    # Uncomment and configure these if using AWS Systems Manager Parameter Store
-    # DATABASE_URL: "/trackerworkflow/database/url"
-    # SECRET_KEY: "/trackerworkflow/jwt/secret-key"
-    # GOOGLE_CLIENT_ID: "/trackerworkflow/google/client-id"
-    # GOOGLE_CLIENT_SECRET: "/trackerworkflow/google/client-secret"
+  # parameter-store:
+  #   # Uncomment this section and configure these if using AWS Systems Manager Parameter Store
+  #   # DATABASE_URL: "/trackerworkflow/database/url"
+  #   # SECRET_KEY: "/trackerworkflow/jwt/secret-key"
+  #   # GOOGLE_CLIENT_ID: "/trackerworkflow/google/client-id"
+  #   # GOOGLE_CLIENT_SECRET: "/trackerworkflow/google/client-secret"
 
 cache:
   paths:
-    - '/root/.cache/pip/**/*'
-
+    - "/root/.cache/pip/**/*"
