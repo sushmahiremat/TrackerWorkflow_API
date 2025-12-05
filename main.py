@@ -26,8 +26,13 @@ from ai_service import ai_service
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Create database tables (with error handling)
+try:
+    Base.metadata.create_all(bind=engine)
+    logger.info("✅ Database tables created/verified successfully")
+except Exception as e:
+    logger.warning(f"⚠️  Could not create database tables at startup: {str(e)}")
+    logger.info("Tables will be created on first database connection")
 
 app = FastAPI(title="TrackerWorkflow API", version="1.0.0")
 

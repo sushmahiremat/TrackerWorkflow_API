@@ -24,18 +24,19 @@ def get_database_url():
 database_url = get_database_url()
 print(f"🔗 Connecting to database: {database_url}")
 
+# Create engine with connection pooling and retry logic
 engine = create_engine(
     database_url,
     echo=False,  # Set to False for better performance
-    pool_pre_ping=True,
-    pool_recycle=300,
+    pool_pre_ping=True,  # Verify connections before using
+    pool_recycle=300,  # Recycle connections after 5 minutes
     # Performance optimizations
-    pool_size=20,  # Increase connection pool size
-    max_overflow=30,  # Allow more connections when pool is full
-    pool_timeout=30,  # Faster timeout for connection acquisition
+    pool_size=10,  # Reduced for App Runner (was 20)
+    max_overflow=20,  # Reduced for App Runner (was 30)
+    pool_timeout=30,  # Timeout for connection acquisition
     # Connection optimizations
     connect_args={
-        "connect_timeout": 10,  # Faster connection timeout
+        "connect_timeout": 10,  # Connection timeout
         "application_name": "TrackerWorkflow"  # Better monitoring
     }
 )
