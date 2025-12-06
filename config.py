@@ -3,9 +3,10 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Database Configuration
-    database_url: str = "postgresql://postgres:123@localhost:5432/TrackerWorkflow"
+    # Priority: DATABASE_URL env var > individual settings > fallback
+    database_url: Optional[str] = None
     
-    # Alternative individual database settings
+    # Alternative individual database settings (used if DATABASE_URL not set)
     db_host: str = "localhost"
     db_port: str = "5432"
     db_name: str = "TrackerWorkflow"
@@ -17,9 +18,11 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     
-    # Google OAuth settings
-    google_client_id: str = ""
-    google_client_secret: str = ""
+    # Google OAuth settings (REQUIRED for Google login to work)
+    # Set these in .env file for local dev or App Runner environment variables
+    google_client_id: str = "129237008005-gi3c2jogmsb5kuuiag664305f7vgh30c.apps.googleusercontent.com"
+    google_client_secret: str = "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"  # Get from Google Cloud Console
+    google_redirect_uri: str = "https://9uwp8ycrdq.us-east-1.awsapprunner.com/auth/google/callback"
     
     class Config:
         env_file = ".env"
