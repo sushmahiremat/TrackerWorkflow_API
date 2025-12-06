@@ -22,6 +22,12 @@ def get_database_url():
 
 # Create database engine
 database_url = get_database_url()
+# Debug: Show what we're using
+env_db_url = os.getenv('DATABASE_URL')
+if env_db_url:
+    print(f"✅ Using DATABASE_URL from environment: {env_db_url[:50]}...")
+else:
+    print(f"⚠️  DATABASE_URL not found in environment, using fallback")
 print(f"🔗 Connecting to database: {database_url}")
 
 # Create engine with connection pooling and retry logic

@@ -51,7 +51,9 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",  # Development frontend URL
         "https://tracker-workflow.vercel.app",  # Production Vercel URL
-        "https://*.vercel.app"  # Any Vercel subdomain
+        "https://*.vercel.app",  # Any Vercel subdomain
+        "https://y55dfkjshm.us-west-2.awsapprunner.com",  # Frontend App Runner URL
+        "https://*.awsapprunner.com"  # Any App Runner subdomain
     ],
     allow_credentials=True,  # Allow credentials
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Allow all methods
