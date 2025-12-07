@@ -46,17 +46,18 @@ if not os.path.exists(UPLOAD_DIR):
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # CORS middleware - Configuration for both development and production
+# Using allow_origin_regex for wildcard support
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",  # Development frontend URL
+        "http://localhost:3000",  # Alternative dev port
         "https://tracker-workflow.vercel.app",  # Production Vercel URL
-        "https://*.vercel.app",  # Any Vercel subdomain
         "https://y55dfkjshm.us-west-2.awsapprunner.com",  # Frontend App Runner URL
-        "https://*.awsapprunner.com"  # Any App Runner subdomain
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.awsapprunner\.com",  # Wildcard support for subdomains
     allow_credentials=True,  # Allow credentials
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Allow all methods
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
 )
 
@@ -74,18 +75,30 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 @app.post("/login", response_model=Token)
 def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     """Login user and return access token"""
-    user = authenticate_user(db, user_credentials.email, user_credentials.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
+    try:
+        logger.info(f"🔐 Login attempt for email: {user_credentials.email}")
+        user = authenticate_user(db, user_credentials.email, user_credentials.password)
+        if not user:
+            logger.warning(f"❌ Login failed: Invalid credentials for {user_credentials.email}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+        access_token = create_access_token(
+            data={"sub": user.email}, expires_delta=access_token_expires
         )
-    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
-    access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+        logger.info(f"✅ Login successful for: {user_credentials.email}")
+        return {"access_token": access_token, "token_type": "bearer"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Login error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
 
 @app.post("/auth/google", response_model=Token)
 async def google_login(google_data: GoogleLogin, db: Session = Depends(get_db)):
