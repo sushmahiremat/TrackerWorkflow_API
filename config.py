@@ -7,11 +7,11 @@ class Settings(BaseSettings):
     database_url: Optional[str] = None
     
     # Alternative individual database settings (used if DATABASE_URL not set)
-    db_host: str = "localhost"
+    db_host: str = "postgresql://postgres:w1p.z|qj9VV!b|OiPaaRn|4W.P69@trackerworkflow-db.cxuqcquo86g2.us-west-2.rds.amazonaws.com:5432/TrackerWorkfloww1p.z|qj9VV!b|OiPaaRn|4W.P69"
     db_port: str = "5432"
     db_name: str = "TrackerWorkflow"
     db_user: str = "postgres"
-    db_password: str = "123"
+    db_password: str = "w1p.z|qj9VV!b|OiPaaRn|4W.P69"
     
     # JWT Configuration
     secret_key: str = "uygduweydwudywugcgmjkiuytcxzszdsiutuytytrthfd"
