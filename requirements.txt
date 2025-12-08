@@ -6,6 +6,8 @@ pydantic-settings==2.1.0
 python-multipart==0.0.6
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# Pin bcrypt to 3.2.2 to avoid bcrypt 4.x 72-byte password self-test error with passlib 1.7.x
+bcrypt==3.2.2
 python-dotenv==1.0.0
 requests==2.31.0
 google-auth==2.23.4
