@@ -2,16 +2,24 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from config import settings
+from dotenv import load_dotenv
 import os
+
+# Load .env file to make environment variables available to os.getenv()
+load_dotenv()
 
 # Try to get database URL from environment or use fallback
 def get_database_url():
     """Get database URL with fallback options"""
-    # First try environment variable
+    # Priority 1: Check Pydantic settings (reads from .env file)
+    if settings.database_url:
+        return settings.database_url
+    
+    # Priority 2: Check environment variable (os.getenv now works after load_dotenv)
     if os.getenv('DATABASE_URL'):
         return os.getenv('DATABASE_URL')
     
-    # Fallback to individual settings
+    # Priority 3: Fallback to individual settings
     host = os.getenv('DB_HOST', settings.db_host)
     port = os.getenv('DB_PORT', settings.db_port)
     database = os.getenv('DB_NAME', settings.db_name)
@@ -23,11 +31,12 @@ def get_database_url():
 # Create database engine
 database_url = get_database_url()
 # Debug: Show what we're using
-env_db_url = os.getenv('DATABASE_URL')
-if env_db_url:
-    print(f"✅ Using DATABASE_URL from environment: {env_db_url[:50]}...")
+if settings.database_url:
+    print(f"✅ Using DATABASE_URL from .env file (via Pydantic): {settings.database_url[:50]}...")
+elif os.getenv('DATABASE_URL'):
+    print(f"✅ Using DATABASE_URL from environment variable: {os.getenv('DATABASE_URL')[:50]}...")
 else:
-    print(f"⚠️  DATABASE_URL not found in environment, using fallback")
+    print(f"⚠️  DATABASE_URL not found in .env or environment, using fallback settings")
 print(f"🔗 Connecting to database: {database_url}")
 
 # Create engine with connection pooling and retry logic
