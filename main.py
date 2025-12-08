@@ -5,7 +5,7 @@ import shutil
 import re
 from typing import Optional
 from datetime import timedelta
-from fastapi import FastAPI, Depends, HTTPException, status, Request, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, status, Request, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +45,26 @@ if not os.path.exists(UPLOAD_DIR):
 # Mount static files for serving uploaded files
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
+# Request logging middleware - Log all requests
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    # Log incoming request
+    print(f"📥 {request.method} {request.url.path} from {request.client.host if request.client else 'unknown'}")
+    logger.info(f"📥 {request.method} {request.url.path}")
+    
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        print(f"📤 {request.method} {request.url.path} - {response.status_code} ({process_time:.3f}s)")
+        logger.info(f"📤 {request.method} {request.url.path} - {response.status_code} ({process_time:.3f}s)")
+        return response
+    except Exception as e:
+        process_time = time.time() - start_time
+        print(f"❌ {request.method} {request.url.path} - ERROR after {process_time:.3f}s: {type(e).__name__}: {str(e)}")
+        logger.error(f"❌ {request.method} {request.url.path} - ERROR: {str(e)}", exc_info=True)
+        raise
+
 # CORS middleware - Configuration for both development and production
 # Using allow_origin_regex for wildcard support
 app.add_middleware(
@@ -75,25 +95,48 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 @app.post("/login", response_model=Token)
 def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     """Login user and return access token"""
+    # Print statements always show up in logs
+    print("=" * 60)
+    print("🔐 LOGIN ATTEMPT STARTED")
+    print(f"Email: {user_credentials.email}")
+    print("=" * 60)
+    
     try:
         logger.info(f"🔐 Login attempt for email: {user_credentials.email}")
+        print(f"🔐 Login attempt for email: {user_credentials.email}")
+        
+        print("📞 Calling authenticate_user...")
         user = authenticate_user(db, user_credentials.email, user_credentials.password)
+        print(f"✅ authenticate_user returned: {user is not None}")
+        
         if not user:
+            print("❌ User not found or invalid password")
             logger.warning(f"❌ Login failed: Invalid credentials for {user_credentials.email}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        
+        print("✅ User authenticated, creating token...")
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+        print(f"Token expires in: {access_token_expires}")
+        
         access_token = create_access_token(
             data={"sub": user.email}, expires_delta=access_token_expires
         )
+        print("✅ Token created successfully")
         logger.info(f"✅ Login successful for: {user_credentials.email}")
         return {"access_token": access_token, "token_type": "bearer"}
-    except HTTPException:
+    except HTTPException as e:
+        print(f"❌ HTTPException: {e.status_code} - {e.detail}")
         raise
     except Exception as e:
+        print(f"❌ EXCEPTION TYPE: {type(e).__name__}")
+        print(f"❌ EXCEPTION MESSAGE: {str(e)}")
+        import traceback
+        print("❌ FULL TRACEBACK:")
+        print(traceback.format_exc())
         logger.error(f"❌ Login error: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
