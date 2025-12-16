@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Set these in .env file for local dev or App Runner environment variables
     google_client_id: str = "129237008005-gi3c2jogmsb5kuuiag664305f7vgh30c.apps.googleusercontent.com"
     google_client_secret: str = "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"  # Get from Google Cloud Console
-    google_redirect_uri: str = "https://9cqn6rispm.us-west-2.awsapprunner.com /auth/google/callback"
+    google_redirect_uri: str = "https://9cqn6rispm.us-west-2.awsapprunner.com/auth/google/callback"
     
     class Config:
         env_file = ".env"
