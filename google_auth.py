@@ -61,8 +61,7 @@ class GoogleAuthService:
 
     def get_google_auth_url(self) -> str:
         """
-        Generate Google OAuth URL for frontend (not needed for web applications)
-        This is kept for compatibility but web apps don't use redirect URIs
+        Generate Google OAuth URL for frontend
         """
         base_url = "https://accounts.google.com/o/oauth2/v2/auth"
         params = {
@@ -75,5 +74,41 @@ class GoogleAuthService:
         }
         query_string = "&".join([f"{k}={v}" for k, v in params.items()])
         return f"{base_url}?{query_string}"
+
+    async def exchange_code_for_token(self, code: str) -> GoogleUserInfo:
+        """
+        Exchange OAuth authorization code for ID token and get user info
+        """
+        try:
+            # Exchange code for tokens
+            token_url = "https://oauth2.googleapis.com/token"
+            token_data = {
+                "code": code,
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "redirect_uri": settings.google_redirect_uri,
+                "grant_type": "authorization_code"
+            }
+            
+            logger.info("Exchanging OAuth code for tokens...")
+            token_response = requests.post(token_url, data=token_data)
+            token_response.raise_for_status()
+            tokens = token_response.json()
+            
+            id_token_str = tokens.get("id_token")
+            if not id_token_str:
+                raise ValueError("No ID token in response")
+            
+            # Verify and extract user info from ID token
+            logger.info("Verifying ID token from OAuth exchange...")
+            user_info = await self.verify_google_token(id_token_str)
+            
+            return user_info
+        except requests.RequestException as e:
+            logger.error(f"Failed to exchange OAuth code: {e}")
+            raise ValueError("Failed to exchange OAuth code")
+        except Exception as e:
+            logger.error(f"Error exchanging OAuth code: {e}")
+            raise ValueError("OAuth code exchange failed")
 
 google_auth_service = GoogleAuthService()

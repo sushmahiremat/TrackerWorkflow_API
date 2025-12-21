@@ -7,7 +7,7 @@ from typing import Optional
 from datetime import timedelta
 from fastapi import FastAPI, Depends, HTTPException, status, Request, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from database import engine, get_db
@@ -200,6 +200,67 @@ def get_google_auth_url():
     """Get Google OAuth URL for frontend"""
     auth_url = google_auth_service.get_google_auth_url()
     return {"auth_url": auth_url}
+
+@app.get("/auth/google/callback")
+async def google_oauth_callback(code: Optional[str] = None, error: Optional[str] = None, db: Session = Depends(get_db)):
+    """
+    Handle Google OAuth callback
+    Exchanges code for tokens, creates/gets user, and redirects to frontend with JWT
+    """
+    # Frontend URL - where to redirect after successful login
+    frontend_url = "https://y55dfkjshm.us-west-2.awsapprunner.com"
+    
+    try:
+        if error:
+            logger.error(f"Google OAuth error: {error}")
+            return RedirectResponse(
+                url=f"{frontend_url}/login?error={error}",
+                status_code=302
+            )
+        
+        if not code:
+            logger.error("No authorization code received from Google")
+            return RedirectResponse(
+                url=f"{frontend_url}/login?error=no_code",
+                status_code=302
+            )
+        
+        logger.info("🔐 Google OAuth callback received, exchanging code for tokens...")
+        
+        # Step 1: Exchange code for user info
+        google_user = await google_auth_service.exchange_code_for_token(code)
+        logger.info(f"✅ OAuth code exchanged, user: {google_user.email}")
+        
+        # Step 2: Create or get user from database
+        user = create_or_get_google_user(db, google_user)
+        logger.info(f"✅ User retrieved/created: {user.email}")
+        
+        # Step 3: Create access token
+        access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+        access_token = create_access_token(
+            data={"sub": user.email}, expires_delta=access_token_expires
+        )
+        logger.info("✅ Access token created")
+        
+        # Step 4: Redirect to frontend with token in URL
+        # Frontend will extract token from URL and store it
+        redirect_url = f"{frontend_url}/login?token={access_token}"
+        logger.info(f"🎉 Redirecting to frontend with token")
+        
+        return RedirectResponse(url=redirect_url, status_code=302)
+        
+    except ValueError as e:
+        logger.error(f"❌ OAuth callback error: {e}")
+        return RedirectResponse(
+            url=f"{frontend_url}/login?error=oauth_failed",
+            status_code=302
+        )
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in OAuth callback: {e}")
+        return RedirectResponse(
+            url=f"{frontend_url}/login?error=server_error",
+            status_code=302
+        )
 
 @app.get("/me", response_model=UserResponse)
 def read_users_me(current_user: User = Depends(get_current_user)):
