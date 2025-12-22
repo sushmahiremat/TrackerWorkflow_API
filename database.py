@@ -40,6 +40,16 @@ else:
 print(f"🔗 Connecting to database: {database_url}")
 
 # Create engine with connection pooling and retry logic
+# Add SSL for RDS connections (required for AWS RDS)
+connect_args = {
+    "connect_timeout": 10,  # Connection timeout
+    "application_name": "TrackerWorkflow"  # Better monitoring
+}
+
+# Add SSL for RDS if connecting to AWS RDS (not localhost)
+if "rds.amazonaws.com" in database_url or "amazonaws.com" in database_url:
+    connect_args["sslmode"] = "require"  # Require SSL for RDS
+
 engine = create_engine(
     database_url,
     echo=False,  # Set to False for better performance
@@ -50,10 +60,7 @@ engine = create_engine(
     max_overflow=20,  # Reduced for App Runner (was 30)
     pool_timeout=30,  # Timeout for connection acquisition
     # Connection optimizations
-    connect_args={
-        "connect_timeout": 10,  # Connection timeout
-        "application_name": "TrackerWorkflow"  # Better monitoring
-    }
+    connect_args=connect_args
 )
 
 # Create SessionLocal class

@@ -63,6 +63,7 @@ async def log_requests(request: Request, call_next):
         process_time = time.time() - start_time
         print(f"❌ {request.method} {request.url.path} - ERROR after {process_time:.3f}s: {type(e).__name__}: {str(e)}")
         logger.error(f"❌ {request.method} {request.url.path} - ERROR: {str(e)}", exc_info=True)
+        # Re-raise to let FastAPI handle it with CORS middleware
         raise
 
 # CORS middleware - Configuration for both development and production
